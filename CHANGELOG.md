@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 未发布
+## 0.3.0
 
 照着 magpie 的文档和 `internal/plugin/host.js` 逐条对了一遍宿主契约，五处。
 

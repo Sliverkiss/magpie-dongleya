@@ -1,6 +1,6 @@
 {
   "name": "magpie-dongleya",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "magpie provider plugin: 懂了鸭 — SMS-code login, reasoning effort, credits, daily checkin, session continuity",
   "type": "module",
   "main": "./index.mjs",
