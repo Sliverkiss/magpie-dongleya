@@ -502,7 +502,15 @@ export async function handleChatCompletion(client, session, accountState, body, 
             // `upstream.abort()` is what ends it. The outer `finally` still
             // aborts for the paths that never build this generator.
             upstream.abort();
-            await iterator.return?.();
+            // Best effort, like the `ctrl.close()` above: the inner
+            // generator unwinds through its own catch when the abort lands
+            // mid-read, so `.return()` can reject with "流已中止". Nobody
+            // upstream can act on that — the stream is already over.
+            try {
+              await iterator.return?.();
+            } catch {
+              /* already torn down */
+            }
           }
         })();
 

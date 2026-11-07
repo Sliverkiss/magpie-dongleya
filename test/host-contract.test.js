@@ -160,6 +160,50 @@ describe("gateway teardown", () => {
     // response closure) for the full 60s after every streamed turn.
     expect(returned).toBe(true);
   });
+
+  test("a rejecting iterator teardown does not take the response down with it", async () => {
+    // When the abort lands while the inner generator is parked in a body
+    // read, it unwinds through its own catch and `.return()` rejects with
+    // "流已中止". Unhandled, that rejection errors the ReadableStream and
+    // the client loses a reply that already finished.
+    const client = {
+      async chatStream() {
+        return {
+          res: new Response(null, { status: 200 }),
+          events: {
+            [Symbol.asyncIterator]() {
+              let served = false;
+              return {
+                async next() {
+                  if (served) return { done: true, value: undefined };
+                  served = true;
+                  return { done: false, value: { type: "finish", stopReason: "completed" } };
+                },
+                async return() {
+                  throw new Error("懂了鸭流已中止");
+                },
+              };
+            },
+          },
+          abort() {},
+        };
+      },
+      async abortChat() {},
+    };
+
+    const res = await handleChatCompletion(client, { token: "t", userId: "u" }, {}, {
+      ...BODY,
+      stream: true,
+    });
+
+    const text = await res.text();
+    // The turn finished cleanly before the teardown ran, so a teardown
+    // failure must not rewrite it into a failed generation — the client
+    // would be told the answer it just received is an error.
+    expect(text).not.toContain('"finish_reason":"error"');
+    expect(text).toContain('"finish_reason":"stop"');
+    expect(text).toContain("data: [DONE]");
+  });
 });
 
 describe("per-account scope", () => {
