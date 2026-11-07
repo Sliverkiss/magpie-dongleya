@@ -48,9 +48,12 @@ import {
 const PROVIDER = "dongleya";
 const BASE = "https://dongleya.qq.com";
 
-// The vendor publishes no context window per model. These limits are a
-// conservative floor used only for magpie's display and truncation hints —
-// the upstream enforces its own ceiling and answers CONTEXT_TOO_LONG.
+// The vendor publishes no context window: `/api/models` carries no such field
+// and neither bundle mentions one. These numbers are a round placeholder, not
+// a measurement — magpie uses them for the card and for its truncation hint,
+// and the upstream enforces the real ceiling by answering CONTEXT_TOO_LONG,
+// which the gateway maps to a 400. So the worst case of guessing high is one
+// clear "prompt too long" instead of a silent truncation.
 const LIMIT_DEFAULT = { context: 200_000, output: 32_768 };
 
 const CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
@@ -231,6 +234,13 @@ function modelEntry(row) {
       reasoning: (row.efforts?.length ?? 0) > 0,
       input: { text: true, image: false },
       output: { text: true },
+      // The vendor has no `tools` field, so calls travel as `<tool_call>`
+      // blocks in the reply text and magpie lifts them back out. That only
+      // happens for a model the host lists as tool-capable — and the host
+      // reads `capabilities.toolcall`, not the presence of the machinery.
+      // Omitting it left every model looking text-only, so the prompt never
+      // offered the tools and the parser had nothing to lift.
+      toolcall: true,
     },
   };
 }

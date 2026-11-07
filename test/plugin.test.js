@@ -963,6 +963,12 @@ describe("account surfaces", () => {
     // it a modality list rather than a refusal.
     expect(models.hy4.capabilities.input.text).toBe(true);
     expect(models.hy4.capabilities.output.text).toBe(true);
+
+    // Tool calls travel as `<tool_call>` blocks in the reply text, and magpie
+    // only lifts them for a model it lists as tool-capable. Omitting the flag
+    // left every model text-only, so the prompt never offered the tools.
+    expect(models.hy4.capabilities.toolcall).toBe(true);
+    expect(models.auto.capabilities.toolcall).toBe(true);
   });
 
   test("config declares an openai-compatible provider", async () => {

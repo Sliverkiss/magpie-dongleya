@@ -428,12 +428,25 @@ export class DongleyaClient {
         headers,
         body: json === undefined ? undefined : JSON.stringify(json),
         signal: deadline,
+        // The bearer token rides in a header, and `follow` would carry it to
+        // wherever the redirect points. The vendor has no legitimate reason
+        // to redirect an API call, so a 3xx is a security event, not a
+        // routing detail: refuse it rather than hand the credential over.
+        redirect: "manual",
       });
     } catch (e) {
       if (e?.name === "AbortError") throw e;
       if (e?.name === "TimeoutError")
         throw new UpstreamError(`懂了鸭请求超时: ${path}`, { status: 504 });
       throw new UpstreamError(`懂了鸭网络错误: ${e?.message ?? e}`, { status: 502 });
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      // Drain so the socket is not left half-read; the body is meaningless.
+      await res.text().catch(() => {});
+      throw new UpstreamError(`懂了鸭接口返回重定向（${res.status}），已拒绝跟随`, {
+        status: 502,
+      });
     }
 
     let text;
@@ -573,6 +586,9 @@ export class DongleyaClient {
         headers,
         body: JSON.stringify(body),
         signal: effSignal,
+        // Same rule as `#fetch`: the bearer token is a header, and `follow`
+        // would take it wherever the redirect leads.
+        redirect: "manual",
       });
     } catch (e) {
       clearTimeout(timer);
@@ -587,6 +603,14 @@ export class DongleyaClient {
         throw new UpstreamError("懂了鸭首字节超时", { status: 504 });
       }
       throw e;
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      clearTimeout(timer);
+      await res.body?.cancel().catch(() => {});
+      throw new UpstreamError(`懂了鸭接口返回重定向（${res.status}），已拒绝跟随`, {
+        status: 502,
+      });
     }
 
     if (!res.ok) {

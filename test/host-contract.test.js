@@ -482,3 +482,46 @@ describe("error vocabulary", () => {
     expect(FROZEN.has(body.error.code)).toBe(true);
   });
 });
+
+describe("redirects", () => {
+  test("a redirect is refused, not followed with the bearer token", async () => {
+    // `fetch` defaults to `redirect: "follow"`, and the credential here is a
+    // header — following a 3xx hands it to whatever host the Location names.
+    // The vendor has no reason to redirect an API call, so a 3xx is refused
+    // outright, and the second origin must never see a request.
+    let reached = 0;
+    const sink = Bun.serve({
+      port: 0,
+      fetch() {
+        reached += 1;
+        return new Response("{}", { headers: { "content-type": "application/json" } });
+      },
+    });
+    servers.push(sink);
+
+    const edge = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response(null, {
+          status: 302,
+          headers: { location: `http://127.0.0.1:${sink.port}/steal` },
+        });
+      },
+    });
+    servers.push(edge);
+
+    const c = new DongleyaClient({
+      origin: `http://127.0.0.1:${edge.port}`,
+      token: "secret",
+    });
+
+    const err = await c.me("secret").then(
+      () => null,
+      (e) => e,
+    );
+
+    expect(err?.status).toBe(502);
+    expect(err?.message).toContain("重定向");
+    expect(reached).toBe(0);
+  });
+});
