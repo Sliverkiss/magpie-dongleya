@@ -182,9 +182,9 @@ function acctState(auth) {
     return seen;
   }
   // Nothing in the hook surface says "this account was removed", so entries
-  // are otherwise immortal: a JWT that carries no userId re-logins to a new
-  // `token.slice(0,32)` key each time, orphaning the old one forever. Cap
-  // the map and evict the coldest.
+  // are otherwise immortal: a JWT that carries no userId keys on a digest
+  // of its token, and every re-login mints a new one, orphaning the old
+  // entry forever. Cap the map and evict the coldest.
   if (state.size >= MAX_TRACKED_ACCOUNTS) state.delete(state.keys().next().value);
   const s = { catalog: undefined, catalogAt: 0, catalogFailedAt: 0, catalogPromise: null };
   state.set(key, s);
@@ -299,7 +299,12 @@ async function loadCatalog(auth, s, client, { force = false } = {}) {
         s.catalogFailedAt = Date.now();
       }
       return s.catalog;
-    } catch {
+    } catch (e) {
+      // An expired session is not a catalog outage. Swallowing it here made
+      // the `signIn: "expired"` branch in `provider.models` unreachable —
+      // magpie documents that throw as the way a model list marks an
+      // account dead, so let it through.
+      if (e instanceof AuthExpiredError) throw e;
       s.catalogFailedAt = Date.now();
       return s.catalog; // keep whatever we had; never break a request over the catalog
     } finally {

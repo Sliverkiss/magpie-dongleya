@@ -903,6 +903,22 @@ describe("account surfaces", () => {
     expect(Object.keys(models.auto.variants)).toEqual([]);
   });
 
+  test("provider.models marks the account expired when the catalog says 401", async () => {
+    // magpie documents a thrown `signIn:"expired"` from provider.models as
+    // the way a model list marks an account dead. loadCatalog used to
+    // swallow every error, so the branch could never fire.
+    const { origin } = mockVendor({ modelsStatus: 401 });
+    const { plugin, getAuth, setAuth } = await bootPlugin(origin);
+    // A userId no other test touches: `state` is module-level and keyed by
+    // account, so reusing u_42 inherits its catalog backoff and short-circuits
+    // the fetch this test exists to exercise.
+    setAuth({ token: makeJwt(), userId: "u_expired_catalog" });
+
+    await expect(plugin.provider.models({}, { auth: await getAuth() })).rejects.toMatchObject({
+      signIn: "expired",
+    });
+  });
+
   test("provider.models falls back to the bundled list without a session", async () => {
     const { origin } = mockVendor();
     const { plugin } = await bootPlugin(origin);
