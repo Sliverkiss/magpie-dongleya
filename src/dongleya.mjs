@@ -6,8 +6,9 @@
 // `/api/v3/chat` `data: `-framed event stream, credits, and the model
 // catalog. Nothing in this file knows about OpenAI or magpie.
 //
-// Verified against the production bundles in `../reverse-bundles/`
-// (dly-ttb.js §authFetch, dly-index.js §smsAuth, dly-chat.js §engine).
+// Verified against the vendor's production bundles, which are kept locally
+// and not shipped (dly-ttb.js §authFetch, dly-index.js §smsAuth,
+// dly-chat.js §engine).
 
 const ORIGIN = "https://dongleya.qq.com";
 
@@ -539,7 +540,7 @@ export class DongleyaClient {
    * so the caller can surface headers-first failures before committing to a
    * 200 stream.
    *
-   * @param {object} body  vendor-shaped body (see PROGRESS.md §4)
+   * @param {object} body  vendor-shaped body (`{ messages, lang, extra }`)
    */
   async chatStream(body, { token, signal } = {}) {
     const headers = {

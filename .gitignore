@@ -8,3 +8,10 @@ node_modules/
 # them, and 9.4M of vendored third-party JS has no business in every
 # clone. Kept on disk.
 reverse-bundles/
+
+# Internal working documents: the reverse-engineering progress log and the
+# construction spec. They cite local paths and analyse the vendor's site
+# far past what a public repo should carry; the sibling magpie plugins
+# keep neither. Kept on disk.
+PROGRESS.md
+SPEC-NOTES.md

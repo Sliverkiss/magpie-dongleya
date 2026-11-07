@@ -34,6 +34,12 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
+      # `npm test` is `bun test`: the suite stands up its mock vendor with
+      # Bun.serve, and magpie itself runs plugins on Bun.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: tag 必须对应 package.json，且提交已合进默认分支
         env:
           REF_NAME: ${{ inputs.tag || github.ref_name }}
@@ -145,7 +151,9 @@ jobs:
             exit 1
           fi
           VERSION=$(node -p "require('./package.json').version")
-          NPM_NAME=$(node scripts/npm-name.mjs)
+          # scripts/npm-name.mjs does not exist; publish-npm.mjs pins
+          # PUBLISH_AS to the package name anyway, so read it from there.
+          NPM_NAME=$(node -p "require('./package.json').name")
           # 本地 release.mjs --npm 可能已经发过同一版；tag 推上来后 CI 再发会 E409。
           # 同版本已存在 = 发布已完成，跳过且不把 workflow 弄红。
           if npm view "$NPM_NAME@$VERSION" version >/dev/null 2>&1; then

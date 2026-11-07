@@ -4,17 +4,23 @@
   "description": "magpie provider plugin: 懂了鸭 (dongleya.qq.com) web reverse proxy — SMS login, JWT session, reasoning, credits, daily checkin, session continuity",
   "type": "module",
   "main": "./index.mjs",
+  "exports": "./index.mjs",
   "files": [
     "index.mjs",
     "src/",
+    "test/",
+    "scripts/",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "registry-entry.json"
   ],
   "keywords": [
     "magpie",
+    "magpie-plugin",
     "opencode",
     "opencode-plugin",
+    "opencode-auth",
     "plugin",
     "dongleya",
     "eureka",
@@ -23,18 +29,24 @@
     "provider"
   ],
   "license": "MIT",
+  "author": "Sliverkiss",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Sliverkiss/magpie-dongleya.git"
   },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
   "scripts": {
     "check": "node scripts/check.mjs",
+    "score": "node scripts/score.mjs",
     "test": "bun test",
     "test:live": "DONGLEYA_LIVE=1 bun test test/live.test.js",
     "publish:npm": "node scripts/publish-npm.mjs"
   },
   "magpie": {
     "name": "懂了鸭 Dongleya",
+    "maxConcurrency": 4,
     "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHJlY3Qgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiByeD0iMTEiIGZpbGw9IiMwRTdDODYiLz48cGF0aCBkPSJNMTMgMzFjMC04LjMgNi4xLTE0IDE0LTE0aDh2OWgtOGMtMi42IDAtNC40IDEuNi00LjkgNEgzMXY5SDE5Yy0zLjMgMC02LTIuNy02LTZ6IiBmaWxsPSIjZmZmIi8+PGNpcmNsZSBjeD0iMzEuNSIgY3k9IjIwLjUiIHI9IjIuNiIgZmlsbD0iIzBFN0M4NiIvPjxwYXRoIGQ9Ik0zNyAyMi41bDcgMy03IDN6IiBmaWxsPSIjRkZDMjRCIi8+PC9zdmc+"
   }
 }

@@ -118,7 +118,8 @@ magpie 的 checkin 钩子接在 `POST /api/credits/checkin` 上。
 ## 参考源
 
 所有端点和协议都是从前端 bundle 和官方 Skill 包里读出来的，没有瞎猜。
-拆出来的 bundle 在 `reverse-bundles/`（原站 `https://dongleya.gtimg.com/prod/`）：
+拆包产物留在本地 `reverse-bundles/`，**不进仓库**（9.4M 第三方构建产物）。
+下表是对照表，原站在 `https://dongleya.gtimg.com/prod/`：
 
 | 本地文件 | 上游 | 读到了什么 |
 |---|---|---|
@@ -128,25 +129,25 @@ magpie 的 checkin 钩子接在 `POST /api/credits/checkin` 上。
 | `dly-engine.js` / `dly-x.js` | — | 模型目录、计费乘数 |
 | `dly-ttb.js` | `templateTelemetryBridge-zVVXgXml.js` | 遥测（未接） |
 
-拆包用 `reverse-bundles/_ctx.py`（按 pattern 取上下文，不整包读进模型）。
+拆包用本地脚本 `_ctx.py`（按 pattern 取上下文，不整包读进模型；同样不进仓库）。
 
 另外三处：
 
 - **官方 Skill 包**：`https://dongleya.qq.com/d_file/skills/dly-ca-skill-2.2.1.zip`
   （v2.2.1，2026-10-18 打包）。里面是官方授权的 MCP 内容资产面
   （`X-Agent-Token` → `/api/mcp/agent/content-assets`），只覆盖作品发布，
-  **不含对话**——对话面唯一凭据是浏览器 JWT。拆包见 `reverse-bundles/official-skill/`。
+  **不含对话**——对话面唯一凭据是浏览器 JWT。拆包结果同样留本地。
 - **产品调研**：[`kms9/ai-tutor-awesome`](https://github.com/kms9/ai-tutor-awesome)
   （`product/dongleya/`），交叉验证了模型清单和「未商业化：创作积分 / 下载次数 /
   鸭蛋」的定价形态。
-- **参考实现**：[`mimo2api`](../mimo2api)（单入口 + `src/` 结构）、
-  [`richee2api`](../richee2api)（SMS 登录 + 多账号 auth 形状）。
+- **参考实现**：[`magpie-mimo2api`](https://github.com/Sliverkiss/magpie-mimo2api)
+  （单入口 + `src/` 结构）、`richee2api`（SMS 登录 + 多账号 auth 形状，未公开发布）。
   懂了鸭此前**没有公开的逆向实现**（GitHub 搜索零命中）。
 
 ## 开发
 
 ```bash
-bun test                 # 67 条离线测试，全打 mock
+bun test                 # 76 条离线测试，全打 mock
 bun run test:live        # 9 条真机契约测试，打 dongleya.qq.com（只碰公开接口）
 node scripts/check.mjs   # magpie 插件合规检查
 ```
