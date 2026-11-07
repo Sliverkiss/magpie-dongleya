@@ -1,6 +1,6 @@
 # magpie-dongleya
 
-magpie 供应商插件：把腾讯 **懂了鸭 (Dongleya / Eureka)** 的网页会话接成 OpenAI Chat Completions。
+magpie 供应商插件：把 **懂了鸭** 的网页会话接成 OpenAI Chat Completions。
 
 一个账号，10 个模型，推理档位可调，积分余额和每日签到直接显示在 magpie 账号卡片上。
 

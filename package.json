@@ -1,7 +1,7 @@
 {
   "name": "magpie-dongleya",
   "version": "0.2.3",
-  "description": "magpie provider plugin: 懂了鸭 (dongleya.qq.com) web reverse proxy — SMS login, JWT session, reasoning, credits, daily checkin, session continuity",
+  "description": "magpie provider plugin: 懂了鸭 — SMS-code login, reasoning effort, credits, daily checkin, session continuity",
   "type": "module",
   "main": "./index.mjs",
   "exports": "./index.mjs",
@@ -24,7 +24,6 @@
     "plugin",
     "dongleya",
     "eureka",
-    "tencent",
     "2api",
     "provider"
   ],
