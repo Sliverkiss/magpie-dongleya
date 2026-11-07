@@ -37,10 +37,17 @@
   `.return()` 要等读取结束才 settle，而 `upstream.abort()` 正是结束读取的
   那一步。
 
+### 图标
+
+- **`package.json` 里的图标不是这个产品的**。手绘了一张青色 SVG 顶上去，
+  但仓库 `assets/icon.png` 一直是 vendor 的官方标（和
+  `https://dongleya.gtimg.com/prod/favicon.png` 逐字节相同），只是从来没
+  接上。图标改用 `assets/icon-96.png`，不再另画一个。
+
 ### 测试
 
-76 通过 / 9 跳过 / 0 失败。新增 `test/host-contract.test.js` 七条，五处
-修复逐条回退验证过会红。（其中第 5 条第一次写错：测试 body 漏了
+95 通过 / 9 跳过 / 0 失败。新增 `test/host-contract.test.js` 九条，各条
+修复逐条回退验证过会红。（其中一条第一次写错：测试 body 漏了
 `stream: true`，走的是非流式分支，旧代码下也是绿的。）`_internal` 是文档
 认可的测试出口——magpie 把导出的**对象**当数据，不会当插件调用。
 
