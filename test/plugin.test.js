@@ -93,7 +93,7 @@ function mockVendor(opts = {}) {
               },
             });
           }
-          return json({ success: true, user: { userId: "u_42", phone: "13800001234", nickname: "鸭友" } });
+          return json({ success: true, user: { userId: "u_42", phone: "13800138000", nickname: "鸭友" } });
 
         case "/api/access/redeem-invite": {
           const want = opts.gate?.require;
@@ -203,7 +203,7 @@ async function bootPlugin(origin, extraOptions, options = new Set()) {
 }
 
 /** Complete the SMS login method end to end and return the saved session. */
-async function login(plugin, phone = "13800001234") {
+async function login(plugin, phone = "13800138000") {
   const method = plugin.auth.methods[0];
   const first = await method.authorize({ phone });
   expect(first.method).toBe("code");
@@ -222,7 +222,7 @@ describe("login", () => {
     expect(saved.access).toBe(saved.token);
     expect(saved.refresh).toBe(saved.token);
     expect(saved.userId).toBe("u_42");
-    expect(saved.phone).toBe("13800001234");
+    expect(saved.phone).toBe("13800138000");
     expect(saved.expires).toBeGreaterThan(Date.now());
     expect(saved.label).toBe("鸭友");
     expect(saved.accountId).toBe("鸭友");
@@ -231,7 +231,7 @@ describe("login", () => {
   test("a wrong code surfaces as a failed login, not a thrown error", async () => {
     const { origin } = mockVendor();
     const { plugin } = await bootPlugin(origin);
-    const first = await plugin.auth.methods[0].authorize({ phone: "13800001234" });
+    const first = await plugin.auth.methods[0].authorize({ phone: "13800138000" });
     const r = await first.callback("000000");
     expect(r.type).toBe("failed");
     expect(r.error).toContain("验证码不正确");
