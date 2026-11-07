@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## 未发布
+
+照着 magpie 的文档和 `internal/plugin/host.js` 逐条对了一遍宿主契约，五处。
+
+### 修
+
+- **首字节超时是死代码**。`abort(reason)` 让 `fetch` 抛的是 reason 本身
+  （`name` 是 `"Error"` 而不是 `"AbortError"`），所以 `e.name ===
+  "AbortError"` 那个分支永远进不去：裸的英文 reason 一路漏到网关，被
+  `errorStatus()` 当成未知错误映射成 502，这条路径存在的意义——504——丢了。
+  改成看 controller 有没有被点燃，而不是看错误名。
+- **超时常量伪造了 vendor 的归属**。注释写着「vendor's own first-byte
+  ceiling」，但 vendor 的 bundle 里根本没有 60s：仅有的具名超时是
+  `self_update` 的 30s 和 `preview` 的 5s，两个都不是聊天流，而推理模型的
+  首 token 本来就比这两个都久。这两个值是插件自己的判断，需要它的原因是
+  反过来的——magpie 对流式 `fetch` **没有任何 deadline**，只有
+  `init.signal`，没有看门狗的话一条半开连接会把请求、客户端和 socket 一起
+  钉住，直到 agent 放弃（而 agent 没有回合超时，所以是永远）。三个超时
+  改成可注入，测试跑毫秒不睡觉。
+- **目录失败退避在真正需要的场景里不可达**。它挂在 `if (s.catalog)` 的
+  `else if` 上，只在「从没有过 catalog」时执行；而打爆 vendor 的恰恰是
+  「有旧 catalog + vendor 挂了」——那里 `fresh` 为 false，走的是另一个分支，
+  于是整段故障期间每轮对话都打一次 `GET /api/models`，6 小时 TTL 从不生效。
+  改成无条件先判退避。
+- **`scopeKey` 让所有账号塌进同一个 state**。`token.slice(0, 32)` 取的是
+  JWT 的 header（`{alg,typ}` 的 base64url，第一个点之前有 36 字符），同一个
+  issuer 签出来的每个 token 这个前缀完全一样。后果是一个共享的目录、一个
+  共享的额度卡、一个共享的「已过期」标记，以及永远不触发的淘汰上限
+  （`state.size` 恒为 1）。改成摘要整个 token，JWT 带 `userId` 时优先用
+  更稳定的 `userId`。
+- **网关的包装生成器从不解除内层迭代器**。`for await` 会调
+  `events.return()`，它把包装生成器从 `yield` 处唤醒——但没有任何东西去
+  唤醒 `iterator` 本身，于是内层永远挂在那里，捎带着两个 60s 定时器和整个
+  响应闭包，每流式一轮泄漏一次。先 abort 再解绑：停在正文读取上的生成器，
+  `.return()` 要等读取结束才 settle，而 `upstream.abort()` 正是结束读取的
+  那一步。
+
+### 测试
+
+76 通过 / 9 跳过 / 0 失败。新增 `test/host-contract.test.js` 七条，五处
+修复逐条回退验证过会红。（其中第 5 条第一次写错：测试 body 漏了
+`stream: true`，走的是非流式分支，旧代码下也是绿的。）`_internal` 是文档
+认可的测试出口——magpie 把导出的**对象**当数据，不会当插件调用。
+
 ## 0.2.3
 
 ### 修
