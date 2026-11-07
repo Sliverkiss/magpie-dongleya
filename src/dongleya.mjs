@@ -366,21 +366,39 @@ function parseBlock(block) {
 // client
 // ---------------------------------------------------------------------------
 
-const FIRST_BYTE_TIMEOUT_MS = 60_000; // vendor's own first-byte ceiling
-const IDLE_TIMEOUT_MS = 60_000; // vendor's own idle ceiling
+// The vendor publishes no ceiling to copy here. The only named timeouts in
+// its bundles are 30s for its self-update script and 5s for a preview's
+// first frame; neither is the chat stream, and a reasoning model's
+// first token routinely outlives both anyway. So these two are the
+// plugin's own judgement, and they exist because magpie imposes nothing in
+// this direction: for `fetch` the host contract is `init.signal` alone
+// ("在 agent 放弃请求时中止") and the body is relayed chunk by chunk with
+// no deadline anywhere in internal/plugin/host.js. Without a watchdog a
+// half-open edge pins the request, the client and the socket until the
+// agent gives up — which, for an agent with no turn timeout, is never.
+const FIRST_BYTE_TIMEOUT_MS = 60_000;
+const IDLE_TIMEOUT_MS = 60_000;
 /** Ceiling for a whole non-streaming call, headers and body together. */
 const FETCH_TIMEOUT_MS = 30_000;
 
 /**
  * One account's view of the vendor.
  *
- * @param {{ token?: string }} opts  `token` is the `eureka_token` JWT.
+ * The three timeouts are overridable so tests can drive them in
+ * milliseconds instead of sleeping for a minute.
+ *
+ * @param {{ token?: string, firstByteTimeoutMs?: number,
+ *           idleTimeoutMs?: number, fetchTimeoutMs?: number }} opts
+ *   `token` is the `eureka_token` JWT.
  */
 export class DongleyaClient {
   constructor(opts = {}) {
     this.token = opts.token ?? "";
     this.origin = opts.origin ?? ORIGIN;
     this.onLog = opts.onLog ?? (() => {});
+    this.firstByteTimeoutMs = opts.firstByteTimeoutMs ?? FIRST_BYTE_TIMEOUT_MS;
+    this.idleTimeoutMs = opts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
+    this.fetchTimeoutMs = opts.fetchTimeoutMs ?? FETCH_TIMEOUT_MS;
   }
 
   // ---- low level ---------------------------------------------------------
@@ -395,7 +413,7 @@ export class DongleyaClient {
     // session closure and the socket — for as long as the stall lasted. The
     // chat path has its own first-byte timeout; everything else gets this.
     // `AbortSignal.timeout` self-cleans, so there is no timer to clear.
-    const deadline = signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const deadline = signal ?? AbortSignal.timeout(this.fetchTimeoutMs);
 
     let res;
     try {
@@ -536,7 +554,10 @@ export class DongleyaClient {
     if (body?.sessionId) headers["x-session-id"] = String(body.sessionId);
 
     const firstByte = new AbortController();
-    const timer = setTimeout(() => firstByte.abort(new Error("first-byte timeout")), FIRST_BYTE_TIMEOUT_MS);
+    const timer = setTimeout(() => firstByte.abort(new Error("first-byte timeout")), this.firstByteTimeoutMs);
+    // `AbortSignal.any` composes rather than replaces: magpie's `init.signal`
+    // still reaches the fetch, so the host can abandon the turn even while
+    // the watchdog is armed.
     const effSignal = signal ? AbortSignal.any([signal, firstByte.signal]) : firstByte.signal;
 
     let res;
@@ -549,7 +570,14 @@ export class DongleyaClient {
       });
     } catch (e) {
       clearTimeout(timer);
-      if (e?.name === "AbortError" && !signal?.aborted) {
+      // `abort(reason)` makes fetch reject with the reason *itself*, not an
+      // `AbortError`, so this has to test the controller rather than
+      // `e.name`. It was an `e.name === "AbortError"` guard, which never
+      // matched: the raw English reason escaped to the gateway, which maps
+      // an unknown error to 502 and lost the 504 this path exists to send.
+      // Only *our* controller firing is a timeout — a caller's abort is
+      // magpie abandoning the turn, and is not ours to relabel.
+      if (firstByte.signal.aborted) {
         throw new UpstreamError("懂了鸭首字节超时", { status: 504 });
       }
       throw e;
@@ -584,7 +612,7 @@ export class DongleyaClient {
     let idleTimer = null;
     const armIdle = () => {
       if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => abortCtrl.abort(new Error("idle timeout")), IDLE_TIMEOUT_MS);
+      idleTimer = setTimeout(() => abortCtrl.abort(new Error("idle timeout")), this.idleTimeoutMs);
     };
 
     try {

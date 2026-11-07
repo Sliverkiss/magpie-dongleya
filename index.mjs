@@ -17,6 +17,7 @@
 // callback can never receive the code. The SMS path below is the vendor's
 // own login route and needs no browser at all.
 
+import { createHash } from "node:crypto";
 import {
   AUTHOR_INVITE,
   clearInvite,
@@ -155,7 +156,20 @@ function authWithSession(prev, sess) {
 const state = new Map();
 
 function scopeKey(auth) {
-  return auth?.userId || auth?.uid || auth?.token?.slice(0, 32) || "default";
+  if (auth?.userId) return `u:${auth.userId}`;
+  if (auth?.uid) return `u:${auth.uid}`;
+  if (auth?.accountId) return `a:${auth.accountId}`;
+  if (auth?.token) {
+    // A JWT's first 32 characters are its *header* — base64url of
+    // {alg, typ}, 36 chars before the first dot — and that is
+    // byte-identical for every token the same issuer mints. Keying on
+    // `token.slice(0, 32)` therefore collapsed every account into one
+    // entry: one shared catalog, one shared quota card, one shared
+    // "expired" flag, and the eviction cap never kicking in because
+    // `state.size` was always 1. Digest the whole token instead.
+    return `t:${createHash("sha256").update(auth.token).digest("hex")}`;
+  }
+  return "default";
 }
 
 function acctState(auth) {
@@ -259,17 +273,18 @@ async function loadCatalog(auth, s, client, { force = false } = {}) {
   if (s.catalogPromise) return s.catalogPromise;
 
   const now = Date.now();
-  if (s.catalog) {
-    const fresh = now - s.catalogAt < CATALOG_TTL_MS;
-    if (fresh && !force) return s.catalog;
-  } else if (now - s.catalogFailedAt < CATALOG_FAIL_TTL_MS) {
-    // Backing off after a failed fetch. Without this, `catalog` stays
-    // undefined, every caller passes `force: !s.catalog` — true — and a
-    // vendor outage or an empty list turns into one GET /api/models per chat
-    // turn, forever, with the 6h TTL never engaging. `force` deliberately
-    // does not override the backoff: there is nothing to force.
-    return s.catalog;
-  }
+
+  // A failed fetch backs off whether or not a catalog is cached. This used
+  // to live in an `else if` hanging off `if (s.catalog)`, so it only ran
+  // when there was no catalog at all — and the case that actually hammers
+  // the vendor is a *stale* catalog with the vendor down. There `fresh` is
+  // false, the branch was skipped, and every chat turn fired one GET
+  // /api/models for as long as the outage lasted, with the 6h TTL never
+  // engaging. `force` deliberately does not override this: there is
+  // nothing to force.
+  if (now - s.catalogFailedAt < CATALOG_FAIL_TTL_MS) return s.catalog;
+
+  if (s.catalog && now - s.catalogAt < CATALOG_TTL_MS && !force) return s.catalog;
 
   s.catalogPromise = (async () => {
     try {
@@ -847,3 +862,8 @@ export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
 };
 
 export default DongleyaAuthPlugin;
+
+/** Test surface. magpie calls every exported *function* as a plugin, so
+ *  this is an object on purpose: nothing here is registered or invoked.
+ *  (See docs/zh/plugins § 模块导出什么.) */
+export const _internal = { loadCatalog, scopeKey };

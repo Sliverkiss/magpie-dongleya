@@ -481,11 +481,28 @@ export async function handleChatCompletion(client, session, accountState, body, 
 
         // Replay the event pulled above, then drain the rest of the stream.
         const events = (async function* () {
-          if (!first.done) yield first.value;
-          while (true) {
-            const n = await iterator.next();
-            if (n.done) return;
-            yield n.value;
+          try {
+            if (!first.done) yield first.value;
+            while (true) {
+              const n = await iterator.next();
+              if (n.done) return;
+              yield n.value;
+            }
+          } finally {
+            // Closing this wrapper has to close the vendor iterator too.
+            // `for await` calls `events.return()`, which resumes this
+            // generator at its `yield` and runs this block — but nothing
+            // resumes `iterator` itself, so without the explicit `.return()`
+            // the inner generator stays suspended forever, holding the
+            // first-byte and idle timers (60s each) and the whole response
+            // closure with them, once per streamed turn.
+            //
+            // Abort before unwinding: `.return()` on a generator parked in
+            // a body read only settles once that read does, and
+            // `upstream.abort()` is what ends it. The outer `finally` still
+            // aborts for the paths that never build this generator.
+            upstream.abort();
+            await iterator.return?.();
           }
         })();
 
