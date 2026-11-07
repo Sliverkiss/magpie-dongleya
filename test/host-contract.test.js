@@ -257,3 +257,52 @@ describe("catalog backoff", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("streamed failure reasons", () => {
+  // A `finish` frame can carry a failure reason instead of a clean stop. The
+  // status is already spent on 200, so the plugin has to say so in-band —
+  // otherwise a filtered or credit-starved reply reaches magpie marked a
+  // complete answer and is billed as one.
+  for (const [stopReason, code] of [
+    ["content_filter", "CONTENT_FILTER"],
+    ["insufficient_credits", "INSUFFICIENT_CREDITS"],
+    ["model_stalled", "MODEL_STALLED"],
+    ["error", "CHAT_REQUEST_FAILED"],
+  ]) {
+    test(`${stopReason} finishes as an error frame, not a clean stop`, async () => {
+      const client = {
+        async chatStream() {
+          return {
+            res: new Response(null, { status: 200 }),
+            events: {
+              [Symbol.asyncIterator]() {
+                let served = false;
+                return {
+                  async next() {
+                    if (served) return { done: true, value: undefined };
+                    served = true;
+                    return { done: false, value: { type: "finish", stopReason } };
+                  },
+                  async return() {
+                    return { done: true, value: undefined };
+                  },
+                };
+              },
+            },
+            abort() {},
+          };
+        },
+        async abortChat() {},
+      };
+
+      const res = await handleChatCompletion(client, { token: "t", userId: "u" }, {}, {
+        ...BODY,
+        stream: true,
+      });
+
+      const text = await res.text();
+      expect(text).toContain(`"code":"${code}"`);
+      expect(text).not.toContain('"finish_reason":"stop"');
+    });
+  }
+});

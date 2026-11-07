@@ -457,6 +457,13 @@ export async function handleChatCompletion(client, session, accountState, body, 
   const first = await iterator.next();
   if (first.value?.type === "error") {
     upstream.abort();
+    // Same teardown as the wrapper's finally: without it the inner
+    // generator stays suspended at its yield and its idle timer stays armed.
+    try {
+      await iterator.return?.();
+    } catch {
+      /* already torn down */
+    }
     throw inBandError(first.value);
   }
 
@@ -572,6 +579,22 @@ export async function handleChatCompletion(client, session, accountState, body, 
           return;
         }
 
+        // A `finish` frame carrying a failure reason is not a clean stop.
+        // The status is already spent on 200, so say so in-band.
+        const failure = stopReasonFailure(stopReason);
+        if (failure) {
+          send({
+            id,
+            object: "chat.completion.chunk",
+            created,
+            model,
+            choices: [{ index: 0, delta: {}, finish_reason: "error" }],
+            error: failure,
+          });
+          sendDone();
+          return;
+        }
+
         const finishReason = mapFinishReason(stopReason);
         send(chunkBody(id, model, created, {}, finishReason));
 
@@ -682,13 +705,34 @@ function mapFinishReason(stopReason) {
   }
 }
 
+/**
+ * A `finish` frame can carry a failure reason instead of a clean stop.
+ *
+ * The non-streaming path turns these into the matching HTTP status, so
+ * magpie can mark the account or retry. The streaming path has already
+ * committed to 200 and cannot take the status back — but reporting them as
+ * `stop` is worse than useless: a filtered or credit-starved reply arrives
+ * marked a complete answer and is billed as one. Both paths read this
+ * table; only the delivery differs.
+ */
+const STOP_REASON_FAILURES = {
+  content_filter: { message: "内容被懂了鸭安全策略拦截", code: "CONTENT_FILTER" },
+  insufficient_credits: { message: "懂了鸭积分不足", code: "INSUFFICIENT_CREDITS" },
+  model_stalled: { message: "懂了鸭模型响应停滞", code: "MODEL_STALLED" },
+  error: { message: "懂了鸭生成失败", code: "CHAT_REQUEST_FAILED" },
+};
+
+function stopReasonFailure(stopReason) {
+  return STOP_REASON_FAILURES[stopReason] ?? null;
+}
+
 function assertStopReason(stopReason) {
-  if (stopReason === "content_filter") throw new ContentFilterError();
-  if (stopReason === "insufficient_credits") throw new InsufficientCreditsError();
-  if (stopReason === "model_stalled") {
-    throw new StreamFrameError("懂了鸭模型响应停滞", { kind: "busy", code: "MODEL_STALLED" });
+  const failure = stopReasonFailure(stopReason);
+  if (!failure) return;
+  if (failure.code === "CONTENT_FILTER") throw new ContentFilterError(failure.message);
+  if (failure.code === "INSUFFICIENT_CREDITS") throw new InsufficientCreditsError(failure.message);
+  if (failure.code === "MODEL_STALLED") {
+    throw new StreamFrameError(failure.message, { kind: "busy", code: failure.code });
   }
-  if (stopReason === "error") {
-    throw new StreamFrameError("懂了鸭生成失败", { kind: "unknown", code: "CHAT_REQUEST_FAILED" });
-  }
+  throw new StreamFrameError(failure.message, { kind: "unknown", code: failure.code });
 }

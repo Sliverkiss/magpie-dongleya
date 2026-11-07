@@ -349,6 +349,26 @@ describe("chat completion", () => {
     expect(chat.headers.get("user-agent")).toContain("Chrome");
   });
 
+  test("accepts a byte body — HOOKS.md documents bytes as the non-UTF-8 path", async () => {
+    const { origin } = mockVendor();
+    const { plugin, getAuth, setAuth } = await bootPlugin(origin);
+    setAuth(await login(plugin));
+
+    const loader = await plugin.auth.loader(getAuth);
+    const res = await loader.fetch("http://x/chat/completions", {
+      method: "POST",
+      // `String(bytes)` yields "123,34,...", so a plugin that parses the raw
+      // value rejects every non-UTF-8 turn as malformed JSON.
+      body: new TextEncoder().encode(
+        JSON.stringify({ model: "hy4", messages: [{ role: "user", content: "你好" }] }),
+      ),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.choices[0].message.content).toBe("你好，鸭。");
+  });
+
   test("streaming emits role, deltas, finish and a bare [DONE]", async () => {
     const { origin } = mockVendor();
     const { plugin, getAuth, setAuth } = await bootPlugin(origin);

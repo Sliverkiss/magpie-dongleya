@@ -314,6 +314,20 @@ async function loadCatalog(auth, s, client, { force = false } = {}) {
 // plugin
 // ---------------------------------------------------------------------------
 
+/**
+ * `init.body` is documented as a JSON string, or bytes when the payload is
+ * not UTF-8 (HOOKS.md:525). `String(bytes)` yields `"123,34,107"` — a
+ * string, so the try/catch around JSON.parse never sees a type error and
+ * every turn is rejected as malformed JSON. Decode before parsing.
+ */
+function decodeRequestBody(body) {
+  if (body == null) return "{}";
+  if (typeof body === "string") return body;
+  if (body instanceof Uint8Array) return new TextDecoder().decode(body);
+  if (body instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(body));
+  return String(body);
+}
+
 export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
   const log = (level, msg) => {
     if (options?.debug) console.log(`[dongleya] ${level}: ${msg}`);
@@ -630,7 +644,7 @@ export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
           async fetch(input, init) {
             let body;
             try {
-              body = JSON.parse(String(init?.body ?? "{}"));
+              body = JSON.parse(decodeRequestBody(init?.body));
             } catch {
               return openaiError(400, "request body is not valid JSON", "invalid_request_error");
             }
