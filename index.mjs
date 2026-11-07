@@ -37,7 +37,13 @@ import {
   decodeJwt,
   maskPhone,
 } from "./src/dongleya.mjs";
-import { handleChatCompletion, errorStatus, GatewayError, openaiError } from "./src/gateway.mjs";
+import {
+  handleChatCompletion,
+  errorStatus,
+  errorCode,
+  GatewayError,
+  openaiError,
+} from "./src/gateway.mjs";
 
 const PROVIDER = "dongleya";
 const BASE = "https://dongleya.qq.com";
@@ -671,11 +677,11 @@ export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
               // Propagate the cancellation the way the host's own fetch does.
               if (err?.name === "AbortError") throw err;
               const status = errorStatus(err);
-              // The envelope's `code` is the upstream code name when we have
-              // one, not the HTTP status — `openaiError` otherwise repeats
-              // the status in both fields, so `code: 502` says nothing about
-              // what happened.
-              const codeName = err?.codeName ?? err?.code ?? status;
+              // The envelope's `code` must be a word from the host's frozen
+              // vocabulary (§3). Neither a numeric status nor the vendor's
+              // own `codeName` (`MODEL_BUSY`) is one — an agent branching on
+              // either matches nothing it knows.
+              const codeName = errorCode(err, status);
               // The vendor's backoff guidance dies here otherwise: it is a
               // header on their 429, and without forwarding it every client
               // and every retry loop guesses its own pace.
@@ -684,6 +690,11 @@ export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
                 Number.isFinite(retryAfter) && retryAfter > 0
                   ? { "retry-after": String(Math.ceil(retryAfter)) }
                   : {};
+              // R5: a 401 that is not an expiry must say so — otherwise
+              // magpie marks the account dead and offers a re-sign-in that
+              // cannot fix an invite gate. AuthExpiredError never reaches
+              // here; it leaves as `signIn: "expired"` above.
+              if (status === 401) headers["x-magpie-sign-in"] = "kept";
               return openaiError(status, err?.message ?? String(err), "upstream_error", codeName, headers);
             }
           },

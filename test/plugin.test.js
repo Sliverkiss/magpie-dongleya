@@ -457,7 +457,7 @@ describe("chat completion", () => {
   // back as HTTP 200 with an error frame inside. magpie cannot mark an
   // account from a frame, so it retried the dead session every turn.
   for (const stream of [false, true]) {
-    test(`the invite gate is a 403 and never a signIn:expired (stream=${stream})`, async () => {
+    test(`the invite gate is a 401-kept and never a signIn:expired (stream=${stream})`, async () => {
       const { origin } = mockVendor({ invite: true });
       const { plugin, getAuth, setAuth } = await bootPlugin(origin);
       setAuth(await login(plugin));
@@ -467,8 +467,10 @@ describe("chat completion", () => {
         method: "POST",
         body: JSON.stringify({ model: "auto", stream, messages: [{ role: "user", content: "q" }] }),
       });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(401);
+      expect(res.headers.get("x-magpie-sign-in")).toBe("kept");
       const body = await res.json();
+      expect(body.error.code).toBe("sign_in_required");
       expect(body.error.message).toContain("邀请");
     });
   }
@@ -495,8 +497,10 @@ describe("chat completion", () => {
       });
 
       if (!stream) {
-        expect(res.status).toBe(502);
-        expect((await res.json()).error.code).toBe("STREAM_TRUNCATED");
+        expect(res.status).toBe(504);
+        const body = await res.json();
+        expect(body.error.code).toBe("upstream_timeout");
+        expect(body.error.status).toBe(504);
         return;
       }
       // Streaming: headers are long gone, so the truncation has to arrive as
@@ -507,7 +511,8 @@ describe("chat completion", () => {
         .filter((b) => b.startsWith("data: ") && !b.includes("[DONE]"))
         .map((b) => JSON.parse(b.slice(6)));
       const bad = frames.find((f) => f.error);
-      expect(bad.error.code).toBe("STREAM_TRUNCATED");
+      expect(bad.error.code).toBe("upstream_timeout");
+      expect(bad.error.status).toBe(504);
       expect(frames.some((f) => f.choices?.[0]?.finish_reason === "stop")).toBe(false);
     });
   }

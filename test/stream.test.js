@@ -166,12 +166,16 @@ describe("errorStatus", () => {
     expect(errorStatus(new AuthExpiredError())).toBe(401);
     expect(errorStatus(new ModelNotFoundError("x", []))).toBe(404);
     expect(errorStatus(new ContentFilterError())).toBe(400);
-    expect(errorStatus(new InsufficientCreditsError())).toBe(402);
+    // 402 is not in the host's table: credits are an account wall, and
+    // another account clears it, which is what 502 tells magpie to try.
+    expect(errorStatus(new InsufficientCreditsError())).toBe(502);
     expect(errorStatus(new RateLimitedError("slow"))).toBe(429);
-    // The invite gate must never read as an auth expiry: re-login cannot fix it.
-    expect(errorStatus(new InviteRequiredError())).toBe(403);
+    // 401 + `X-Magpie-Sign-In: kept` — an access problem, but the session is
+    // alive, so magpie must not offer a re-sign-in that cannot fix it.
+    expect(errorStatus(new InviteRequiredError())).toBe(401);
     expect(errorStatus(new StreamFrameError("busy", { kind: "busy" }))).toBe(503);
-    expect(errorStatus(new StreamFrameError("bad", { kind: "model-rejected" }))).toBe(403);
+    // 404 shelves just this model; 403 is unknown to the host and retries.
+    expect(errorStatus(new StreamFrameError("bad", { kind: "model-rejected" }))).toBe(404);
     // Verified-live codes: the UA gate is a stale fingerprint (502), not a
     // permission or auth problem (403/401) — re-login must not be offered.
     expect(errorStatus(new ClientRejectedError())).toBe(502);

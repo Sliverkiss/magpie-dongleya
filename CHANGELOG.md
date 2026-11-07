@@ -36,6 +36,18 @@
   响应闭包，每流式一轮泄漏一次。先 abort 再解绑：停在正文读取上的生成器，
   `.return()` 要等读取结束才 settle，而 `upstream.abort()` 正是结束读取的
   那一步。
+- **错误码不是宿主词表里的词**。`STREAM_TRUNCATED`、`CONTENT_FILTER`、
+  `INSUFFICIENT_CREDITS`、`MODEL_STALLED`、`CHAT_REQUEST_FAILED` 五个都是
+  自己造的，agent 拿它分支匹配不到任何东西；`code` 还回退到 HTTP 状态
+  数字，等于什么也没说。现在按 ERROR-CODES §3 的冻结表出词，`errorCode()`
+  按类型映射而**不**透传 `err.code`——那几个类上它装的是 vendor 自己的业务
+  码（`20003`、`INVITE_INVALID`）。流式错误帧补上 `status`：状态行已经
+  花在 200 上，缺了它这条错误没有任何 magpie 能据以决定的信息。
+- **两个状态码不在宿主表里**。402（积分不足）改成 502——额度是账号级的
+  墙，换个账号就过得去，这正是 502 让 magpie 去做的事；4xx 只会让它对着
+  一个没钱的账号反复重试。403（邀请门）改成 401 + `X-Magpie-Sign-In:
+  kept`：既是访问问题、又不是会话过期，两个意思一起说，magpie 就不会去
+  提供一个修不好任何东西的重新登录。
 
 ### 图标
 
@@ -46,7 +58,7 @@
 
 ### 测试
 
-95 通过 / 9 跳过 / 0 失败。新增 `test/host-contract.test.js` 九条，各条
+97 通过 / 9 跳过 / 0 失败。新增 `test/host-contract.test.js` 十一条，各条
 修复逐条回退验证过会红。（其中一条第一次写错：测试 body 漏了
 `stream: true`，走的是非流式分支，旧代码下也是绿的。）`_internal` 是文档
 认可的测试出口——magpie 把导出的**对象**当数据，不会当插件调用。

@@ -65,12 +65,76 @@ function completionBody(id, model, created, content, reasoning, finishReason = "
   };
 }
 
-/** An OpenAI-shaped error so agents show the platform's own words. */
+/** ERROR-CODES §3, v1 — frozen. A plugin may not invent its own words.
+ *  magpie routes on `status` and agents branch on `code`, so a code outside
+ *  this set is a code nobody can act on. */
+export const CODES = Object.freeze({
+  signInRequired: "sign_in_required",
+  sessionExpired: "session_expired",
+  auditBlocked: "audit_blocked",
+  invalidRequest: "invalid_request",
+  modelNotFound: "model_not_found",
+  concurrencyConflict: "concurrency_conflict",
+  rateLimited: "rate_limited",
+  upstreamUnavailable: "upstream_unavailable",
+  upstreamTimeout: "upstream_timeout",
+  upstreamError: "upstream_error",
+  internalError: "internal_error",
+  notImplemented: "not_implemented",
+});
+
+const CODE_BY_STATUS = Object.freeze({
+  400: CODES.invalidRequest,
+  401: CODES.sessionExpired,
+  404: CODES.modelNotFound,
+  409: CODES.concurrencyConflict,
+  429: CODES.rateLimited,
+  501: CODES.notImplemented,
+  502: CODES.upstreamError,
+  503: CODES.upstreamUnavailable,
+  504: CODES.upstreamTimeout,
+});
+
+/** The vocabulary code for a status. Every exit that has nothing more
+ *  specific to say falls back to this, so no response ever ships a numeric
+ *  code or a word outside §3. */
+export function codeForStatus(status) {
+  return CODE_BY_STATUS[status] ?? CODES.upstreamError;
+}
+
+/** The §3 code for an error.
+ *
+ *  Deliberately *not* a passthrough of `err.code`: on several classes that
+ *  field is the vendor's own business code (`20003`, `INVITE_INVALID`), and
+ *  an agent branching on those matches nothing. Map by type; the vendor's
+ *  code stays in the message where it belongs. */
+export function errorCode(err, status) {
+  if (err instanceof InviteRequiredError) return CODES.signInRequired;
+  if (err instanceof AuthExpiredError) return CODES.sessionExpired;
+  if (err instanceof ContentFilterError) return CODES.auditBlocked;
+  if (err instanceof ModelNotFoundError) return CODES.modelNotFound;
+  if (err instanceof RateLimitedError) return CODES.rateLimited;
+  if (err instanceof InvalidInputError) return CODES.invalidRequest;
+  if (err instanceof GatewayError) return err.code ?? codeForStatus(status);
+  if (err instanceof StreamFrameError) {
+    if (err.kind === "busy") return CODES.upstreamUnavailable;
+    if (err.kind === "model-rejected") return CODES.modelNotFound;
+    return CODES.upstreamError;
+  }
+  return codeForStatus(status);
+}
+
+/** An OpenAI-shaped error so agents show the platform's own words.
+ *  `status` is repeated inside the envelope because a streamed failure cannot
+ *  carry it in the status line (§1: all three fields, or the error says
+ *  nothing magpie can decide with). */
 export function openaiError(status, message, type = "upstream_error", code, headers = {}) {
-  return new Response(JSON.stringify({ error: { message, type, code: code ?? status } }), {
-    status,
-    headers: { "content-type": "application/json", ...headers },
-  });
+  return new Response(
+    JSON.stringify({
+      error: { message, type, code: code ?? codeForStatus(status), status },
+    }),
+    { status, headers: { "content-type": "application/json", ...headers } },
+  );
 }
 
 export class GatewayError extends Error {
@@ -95,16 +159,22 @@ export function errorStatus(err) {
   if (err instanceof ClientRejectedError) return 502;
   if (err instanceof ModelNotFoundError) return 404;
   if (err instanceof ContentFilterError) return 400;
-  if (err instanceof InsufficientCreditsError) return 402;
-  // Invite gate is a permissions problem, not an auth expiry: re-login will
-  // not fix it, so it must never surface as 401 (magpie would mark the
-  // account expired and offer a pointless re-sign-in).
-  if (err instanceof InviteRequiredError) return 403;
+  // 402 does not exist in the host's table. Credits are an account-level
+  // wall, and another account clears it — which is exactly what 502 tells
+  // magpie to try. A 4xx would make it retry the broke account forever.
+  if (err instanceof InsufficientCreditsError) return 502;
+  // An invite gate is not an auth expiry, but 403 is not a status magpie
+  // knows either. 401 plus `X-Magpie-Sign-In: kept` says both things at
+  // once: this is an access problem, and the session is not dead — so
+  // magpie shows it without offering a pointless re-sign-in.
+  if (err instanceof InviteRequiredError) return 401;
   if (err instanceof RateLimitedError) return 429;
   if (err instanceof GatewayError) return err.status;
   if (err instanceof StreamFrameError) {
     if (err.kind === "busy") return 503; // transient: failover/retry is correct
-    if (err.kind === "model-rejected") return 403; // deterministic: never retry
+    // The model refused deterministically. 404 is the one status that
+    // shelves just this model; 403 is unknown to the host and would retry.
+    if (err.kind === "model-rejected") return 404;
     return 502;
   }
   if (err instanceof UpstreamError) return err.status;
@@ -414,10 +484,12 @@ export async function handleChatCompletion(client, session, accountState, body, 
     // `reader.read()` just returns `done: true` — so without this the client
     // gets a cut reply marked a clean stop, at full price.
     if (!sawFinish) {
-      throw new StreamFrameError("上游流在 finish 帧之前结束", {
-        kind: "unknown",
-        code: "STREAM_TRUNCATED",
-      });
+      throw new GatewayError(
+        504,
+        "上游流在 finish 帧之前结束",
+        "upstream_error",
+        CODES.upstreamTimeout,
+      );
     }
 
     assertStopReason(stopReason);
@@ -581,7 +653,11 @@ export async function handleChatCompletion(client, session, accountState, body, 
             created,
             model,
             choices: [{ index: 0, delta: {}, finish_reason: "error" }],
-            error: { message: "上游流在 finish 帧之前结束", code: "STREAM_TRUNCATED" },
+            error: {
+              message: "上游流在 finish 帧之前结束",
+              code: CODES.upstreamTimeout,
+              status: 504,
+            },
           });
           sendDone();
           return;
@@ -726,10 +802,29 @@ function mapFinishReason(stopReason) {
  * table; only the delivery differs.
  */
 const STOP_REASON_FAILURES = {
-  content_filter: { message: "内容被懂了鸭安全策略拦截", code: "CONTENT_FILTER" },
-  insufficient_credits: { message: "懂了鸭积分不足", code: "INSUFFICIENT_CREDITS" },
-  model_stalled: { message: "懂了鸭模型响应停滞", code: "MODEL_STALLED" },
-  error: { message: "懂了鸭生成失败", code: "CHAT_REQUEST_FAILED" },
+  content_filter: {
+    message: "内容被懂了鸭安全策略拦截",
+    code: CODES.auditBlocked,
+    status: 400,
+  },
+  // Credits are an account-level wall. 502 is the status that says "another
+  // account clears this, this one never will" — 503 would retry the broke
+  // account, and 402 is not in the host's table at all.
+  insufficient_credits: {
+    message: "懂了鸭积分不足",
+    code: CODES.upstreamError,
+    status: 502,
+  },
+  model_stalled: {
+    message: "懂了鸭模型响应停滞",
+    code: CODES.upstreamTimeout,
+    status: 504,
+  },
+  error: {
+    message: "懂了鸭生成失败",
+    code: CODES.upstreamError,
+    status: 502,
+  },
 };
 
 function stopReasonFailure(stopReason) {
@@ -739,10 +834,9 @@ function stopReasonFailure(stopReason) {
 function assertStopReason(stopReason) {
   const failure = stopReasonFailure(stopReason);
   if (!failure) return;
-  if (failure.code === "CONTENT_FILTER") throw new ContentFilterError(failure.message);
-  if (failure.code === "INSUFFICIENT_CREDITS") throw new InsufficientCreditsError(failure.message);
-  if (failure.code === "MODEL_STALLED") {
-    throw new StreamFrameError(failure.message, { kind: "busy", code: failure.code });
-  }
-  throw new StreamFrameError(failure.message, { kind: "unknown", code: failure.code });
+  // 400 is the audit wall — the one failure another account will refuse just
+  // as fast, so it must not read as retryable. Everything else is an upstream
+  // fault and carries its own status.
+  if (failure.status === 400) throw new ContentFilterError(failure.message);
+  throw new GatewayError(failure.status, failure.message, "upstream_error", failure.code);
 }
