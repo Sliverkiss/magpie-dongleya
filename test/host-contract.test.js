@@ -306,3 +306,105 @@ describe("streamed failure reasons", () => {
     });
   }
 });
+
+/** A vendor that answers 200 and then never sends a chunk. */
+function headersThenSilence() {
+  const s = Bun.serve({
+    port: 0,
+    fetch() {
+      return new Response(
+        new ReadableStream({
+          start() {
+            /* headers flushed, no chunk, no close */
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  servers.push(s);
+  return { origin: `http://127.0.0.1:${s.port}` };
+}
+
+describe("half-open streams", () => {
+  test("a vendor that never sends a byte is a 504 首字节超时", async () => {
+    // `fetch` only resolves on the first byte, so a vendor that sends nothing
+    // lands on the first-byte watchdog rather than the iterator's branches.
+    // Pin the status: magpie fails over on 5xx, and silence must never read
+    // as a client cancel or a business error.
+    const { origin } = headersThenSilence();
+    const c = new DongleyaClient({
+      origin,
+      token: "t",
+      firstByteTimeoutMs: 25,
+      idleTimeoutMs: 5000,
+    });
+
+    // The abort can land before or after `fetch` resolves on headers, so the
+    // assertion covers both entry points.
+    const err = await (async () => {
+      const { events } = await c.chatStream(BODY);
+      for await (const _ of events) {
+        /* drain */
+      }
+    })().then(
+      () => null,
+      (e) => e,
+    );
+
+    expect(err?.status).toBe(504);
+    expect(err?.message).toContain("首字节");
+  });
+
+  test("a hang-up still stops the vendor run", async () => {
+    // The id is captured at the gate, before the stream reaches magpie.
+    // It used to be learned from the loop instead, which the cancel tears
+    // down — so a hang-up dropped the connection and left the generation
+    // billing server-side.
+    let aborted = null;
+    let release;
+    const gate = new Promise((r) => {
+      release = r;
+    });
+
+    const client = {
+      async chatStream() {
+        return {
+          res: new Response(null, { status: 200 }),
+          events: {
+            [Symbol.asyncIterator]() {
+              let served = 0;
+              return {
+                async next() {
+                  served += 1;
+                  if (served === 1) {
+                    return { done: false, value: { type: "session-created", sessionId: "s_late" } };
+                  }
+                  await gate; // park until the test has cancelled
+                  return { done: true, value: undefined };
+                },
+                async return() {
+                  return { done: true, value: undefined };
+                },
+              };
+            },
+          },
+          abort() {},
+        };
+      },
+      async abortChat(id) {
+        aborted = id;
+      },
+    };
+
+    const res = await handleChatCompletion(client, { token: "t", userId: "u" }, {}, {
+      ...BODY,
+      stream: true,
+    });
+
+    await res.body.cancel();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(aborted).toBe("s_late");
+    release();
+  });
+});

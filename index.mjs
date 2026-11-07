@@ -665,6 +665,11 @@ export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
                   signIn: "expired",
                 });
               }
+              // The caller cancelled. Nobody is reading this response, and
+              // mapping it to 502 would tell magpie the upstream broke and
+              // send the same prompt to another account — billing it twice.
+              // Propagate the cancellation the way the host's own fetch does.
+              if (err?.name === "AbortError") throw err;
               const status = errorStatus(err);
               // The envelope's `code` is the upstream code name when we have
               // one, not the HTTP status — `openaiError` otherwise repeats
@@ -874,7 +879,11 @@ export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
     // Anthropic, OpenAI and everyone else. That hands magpie's session id to
     // third parties, and vendors that reject unknown headers 400 on it.
     "chat.headers": async (input, output) => {
-      if (input?.provider?.info?.id !== PROVIDER) return;
+      // Two shapes reach this hook: the resolved model carries `providerID`,
+      // and the provider object carries `info.id`. Reading only the latter
+      // meant the header never landed on hosts that populate the former.
+      const providerId = input?.model?.providerID ?? input?.provider?.info?.id;
+      if (providerId !== PROVIDER) return;
       if (input?.sessionID) output.headers["x-session-id"] = String(input.sessionID);
     },
   };

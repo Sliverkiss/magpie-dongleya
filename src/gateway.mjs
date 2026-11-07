@@ -466,6 +466,14 @@ export async function handleChatCompletion(client, session, accountState, body, 
     }
     throw inBandError(first.value);
   }
+  // The vendor opens every run with `session-created`, and this gate already
+  // consumed it. Take the id here, before the stream is handed to magpie:
+  // once the consumer cancels, the `for await` below is torn down and no
+  // further frame ever arrives, so a cancel that raced the first read had no
+  // id to abort the vendor run with and left it billing.
+  if (first.value?.type === "session-created") {
+    vendorSessionId = first.value.sessionId ?? null;
+  }
 
   const readable = new ReadableStream({
     async start(ctrl) {
@@ -645,7 +653,9 @@ export async function handleChatCompletion(client, session, accountState, body, 
       upstream?.abort();
       // magpie hanging up is not the vendor hanging up: without this the
       // generation runs to completion server-side and bills for output
-      // nobody reads.
+      // nobody reads. The id is captured at the gate above, so it is known
+      // before the first byte reaches magpie — a cancel can always stop the
+      // run, not just drop the connection.
       if (vendorSessionId) client.abortChat(vendorSessionId, token).catch(() => {});
     },
   });

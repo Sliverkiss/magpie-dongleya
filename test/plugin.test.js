@@ -971,3 +971,24 @@ describe("account surfaces", () => {
     expect(Object.keys(p.models).length).toBeGreaterThan(8);
   });
 });
+
+describe("chat.headers", () => {
+  test("keys off both provider-id shapes and nothing else", async () => {
+    // Two shapes reach this hook: the resolved model carries `providerID`,
+    // the provider object carries `info.id`. Reading only the latter meant
+    // the session header never landed on hosts that populate the former.
+    const { origin } = mockVendor();
+    const { plugin } = await bootPlugin(origin);
+    const hook = plugin["chat.headers"];
+
+    const idFor = async (input) => {
+      const output = { headers: {} };
+      await hook(input, output);
+      return output.headers["x-session-id"];
+    };
+
+    expect(await idFor({ provider: { info: { id: "dongleya" } }, sessionID: "s1" })).toBe("s1");
+    expect(await idFor({ model: { providerID: "dongleya" }, sessionID: "s2" })).toBe("s2");
+    expect(await idFor({ provider: { info: { id: "openai" } }, sessionID: "s3" })).toBeUndefined();
+  });
+});

@@ -414,7 +414,12 @@ export class DongleyaClient {
     // session closure and the socket — for as long as the stall lasted. The
     // chat path has its own first-byte timeout; everything else gets this.
     // `AbortSignal.timeout` self-cleans, so there is no timer to clear.
-    const deadline = signal ?? AbortSignal.timeout(this.fetchTimeoutMs);
+    // `AbortSignal.any` composes rather than replaces: a caller's signal used
+    // to short-circuit the deadline entirely, so the one non-chat path that
+    // does pass one silently lost its 30s cap.
+    const deadline = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(this.fetchTimeoutMs)])
+      : AbortSignal.timeout(this.fetchTimeoutMs);
 
     let res;
     try {
@@ -586,7 +591,19 @@ export class DongleyaClient {
 
     if (!res.ok) {
       clearTimeout(timer);
-      const text = await res.text().catch(() => "");
+      // The first-byte watchdog fires on headers and is cleared right here.
+      // An edge that sends a 5xx status line and then stalls would park this
+      // read forever — the one half-open case the watchdog exists to cover.
+      // Give the error body its own deadline; on expiry the status line alone
+      // still classifies the failure.
+      let bodyTimer;
+      const text = await Promise.race([
+        res.text().catch(() => ""),
+        new Promise((resolve) => {
+          bodyTimer = setTimeout(() => resolve(""), this.fetchTimeoutMs);
+        }),
+      ]);
+      clearTimeout(bodyTimer);
       let parsed = null;
       try {
         parsed = text ? JSON.parse(text) : null;
@@ -629,15 +646,26 @@ export class DongleyaClient {
     } catch (e) {
       if (callerSignal?.aborted) throw e;
       if (abortCtrl.signal.aborted) {
-        // Only the idle watchdog aborts *with* a reason; a deliberate cancel
-        // aborts bare. Labelling every abort "空闲超时" logged a phantom
-        // timeout for every client that hung up mid-read, and sent the 3am
-        // pager looking at the vendor's latency instead of at the client.
+        // Both watchdogs abort *with* a reason; a deliberate cancel aborts
+        // bare. Labelling every abort "空闲超时" logged a phantom timeout for
+        // every client that hung up mid-read, and sent the 3am pager looking
+        // at the vendor's latency instead of at the client. The first-byte
+        // timer is armed before the idle one and wins the race whenever the
+        // vendor sends headers and then nothing, so it needs its own branch —
+        // it used to fall through to the cancelled one and report a timeout
+        // as a client hang-up.
         const reason = String(abortCtrl.signal.reason?.message ?? "");
         if (reason === "idle timeout") {
           throw new UpstreamError("懂了鸭流空闲超时", { status: 504 });
         }
-        throw new UpstreamError("懂了鸭流已中止", { status: 499 });
+        if (reason === "first-byte timeout") {
+          throw new UpstreamError("懂了鸭首字节超时", { status: 504 });
+        }
+        // Cancelled on purpose. There is nobody left to read a status, and
+        // inventing one (499) made the gateway fail over to another account
+        // for a turn the caller had already abandoned. Hand back the
+        // standard AbortError instead.
+        throw new DOMException("The operation was aborted.", "AbortError");
       }
       throw new UpstreamError("懂了鸭流中断", { status: 502 });
     } finally {
