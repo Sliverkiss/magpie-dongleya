@@ -1,0 +1,9 @@
+{
+  "package": "magpie-dongleya",
+  "name": "懂了鸭 Dongleya",
+  "providers": ["dongleya"],
+  "summary": {
+    "en": "Tencent 懂了鸭 (Eureka) via SMS-code login: 10 models with reasoning-effort control, per-account catalog, credit balance and daily checkin, OpenAI Chat Completions on both streaming and non-streaming paths.",
+    "zh": "腾讯「懂了鸭」（Eureka）短信验证码登录接入：10 个模型、可调推理档位、按账号模型目录、积分余额与每日签到，同时支持流式与非流式 Chat Completions。"
+  }
+}

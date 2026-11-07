@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+*.log
+*.tgz
+
+# The vendor's deobfuscated production bundles the API was derived from
+# (src/dongleya.mjs:9 cites them). Reference only — no code or CI loads
+# them, and 9.4M of vendored third-party JS has no business in every
+# clone. Kept on disk.
+reverse-bundles/
