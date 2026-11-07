@@ -1,7 +1,8 @@
 name: release
 
 # 只允许发布「已经合进默认分支」的提交。
-# 推 v* tag 后先核对版本、祖先关系、合规、测试与打包清单，再建 Release / 发 npm。
+# 推 v* tag 后先核对版本、祖先关系、合规、测试与打包清单，再建 Release。
+# 这个插件不发 npm（只走 GitHub 分发），所以没有 npm 步骤——不是漏了。
 # CHANGELOG 是 Release 正文的唯一来源。
 
 on:
@@ -17,7 +18,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   verify:
@@ -128,53 +128,3 @@ jobs:
               --notes-file notes.md
           fi
 
-  npm:
-    runs-on: ubuntu-latest
-    needs: release
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-      - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error title=NPM_TOKEN 未配置::在仓库 Settings → Secrets and variables → Actions 加 NPM_TOKEN；没有它 npm 步骤不能假装成功"
-            echo "✗ 缺少 NPM_TOKEN：npm 发布门禁失败（不是跳过）" >&2
-            exit 1
-          fi
-          VERSION=$(node -p "require('./package.json').version")
-          # scripts/npm-name.mjs does not exist; publish-npm.mjs pins
-          # PUBLISH_AS to the package name anyway, so read it from there.
-          NPM_NAME=$(node -p "require('./package.json').name")
-          # 本地 release.mjs --npm 可能已经发过同一版；tag 推上来后 CI 再发会 E409。
-          # 同版本已存在 = 发布已完成，跳过且不把 workflow 弄红。
-          if npm view "$NPM_NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "::warning title=npm 版本已存在::$NPM_NAME@$VERSION 已在 npm；跳过重复发布"
-            exit 0
-          fi
-          set +e
-          if [ -f scripts/publish-npm.mjs ]; then
-            node scripts/publish-npm.mjs
-          else
-            npm publish --access public
-          fi
-          code=$?
-          set -e
-          if [ "$code" -ne 0 ]; then
-            # 发布刚完成时 npm view 可能还看不到（staged），publish 会 E409；
-            # 等 5 秒再确认，同版本已在 npm 就当成功，不把 workflow 弄红。
-            sleep 5
-            if npm view "$NPM_NAME@$VERSION" version >/dev/null 2>&1; then
-              echo "::warning title=npm 版本已存在::$NPM_NAME@$VERSION 已发布；按成功处理"
-              exit 0
-            fi
-            exit "$code"
-          fi

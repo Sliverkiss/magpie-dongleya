@@ -183,20 +183,28 @@ if (pkg) {
      "files 白名单非空",
      "不写就把整个仓库（含测试、截图）发到 npm")
 
-  // ── ②b npm 发布能力：显示名 ≠ npm 名，必须有发布脚本与 secret 门 ──────
-  ok(typeof pkg.scripts?.["publish:npm"] === "string" && pkg.scripts["publish:npm"].length > 0,
-     "package.json 有 publish:npm 脚本",
-     "显示名不能直接 npm publish（含中文/大写会被 registry 拒）；发布时由脚本临时换名",
-     '加 "publish:npm": "node scripts/publish-npm.mjs"')
-  const publishFile = [join(ROOT, "scripts", "publish-npm.mjs"), join(ROOT, "publish-npm.mjs")]
-    .find((f) => existsSync(f))
-  ok(!!publishFile,
-     "publish-npm 脚本存在",
-     "有 publish:npm 脚本但没有文件，npm run publish:npm 会直接失败",
-     "从脚手架复制 scripts/publish-npm.mjs，改 PUBLISH_AS 为 npm 包名")
+  // ── ②b npm 发布能力：只在 release.yml 真的发 npm 时才要求 ──────────
+  // 不发 npm 的插件（只走 GitHub / 插件市场）不该被逼着配 NPM_TOKEN：那会让
+  // check 为一个用不上的 secret 常红，或者诱使人去加一个假的。
   const releaseYml = join(ROOT, ".github", "workflows", "release.yml")
-  if (existsSync(releaseYml)) {
-    const releaseSrc = readFileSync(releaseYml, "utf8")
+  const releaseSrc = existsSync(releaseYml) ? readFileSync(releaseYml, "utf8") : ""
+  const publishesToNpm = /NODE_AUTH_TOKEN|npm publish/.test(releaseSrc)
+  if (!existsSync(releaseYml)) {
+    ok(false,
+       "release.yml 存在",
+       "没有 release.yml 就没有 tag/Release 的门禁",
+       "从脚手架复制 .github/workflows/release.yml")
+  } else if (publishesToNpm) {
+    ok(typeof pkg.scripts?.["publish:npm"] === "string" && pkg.scripts["publish:npm"].length > 0,
+       "package.json 有 publish:npm 脚本",
+       "显示名不能直接 npm publish（含中文/大写会被 registry 拒）；发布时由脚本临时换名",
+       '加 "publish:npm": "node scripts/publish-npm.mjs"')
+    const publishFile = [join(ROOT, "scripts", "publish-npm.mjs"), join(ROOT, "publish-npm.mjs")]
+      .find((f) => existsSync(f))
+    ok(!!publishFile,
+       "publish-npm 脚本存在",
+       "有 publish:npm 脚本但没有文件，npm run publish:npm 会直接失败",
+       "从脚手架复制 scripts/publish-npm.mjs，改 PUBLISH_AS 为 npm 包名")
     ok(/NPM_TOKEN/.test(releaseSrc),
        "release.yml 引用 NPM_TOKEN",
        "没有 secret 门，CI 的 npm 步骤会静默跳过（假绿），用户以为已发布",
@@ -205,11 +213,6 @@ if (pkg) {
        "release.yml 有「npm 版本已存在则跳过」守卫",
        "本地 release.mjs 先发过、tag 触发 workflow 再发会 E409 变红；守卫要查 npm view 后 exit 0",
        "在 npm 步骤前加：npm view \"$NPM_NAME@$VERSION\" version && exit 0")
-  } else {
-    ok(false,
-       "release.yml 存在",
-       "没有 release.yml 就没有 tag/Release/npm 的门禁",
-       "从脚手架复制 .github/workflows/release.yml")
   }
 
   // ── ③ 能不能被搜到 ────────────────────────────────────────────────
