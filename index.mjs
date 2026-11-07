@@ -744,7 +744,6 @@ export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
           const money = (n) => `${round2(n)} 积分`;
 
           const balance = num(d.balance);
-          const gifted = num(d.totalGifted);
           const spent = num(d.totalUsed);
           const eggs = num(d.eggs?.balance) ?? num(d.eggBalance);
           const downloads = num(d.downloadQuota?.available);
@@ -757,35 +756,31 @@ export const DongleyaAuthPlugin = async (input = {}, options = {}) => {
           // `creationCredits.available` is the same number under a second
           // name — rendering both showed 489.69 twice, as two wallets.
           //
-          // No `used` here on purpose: magpie reads it as a percentage of a
-          // cap, and `used: 0` is a real "0% consumed", not "unknown". A
-          // prepaid wallet is expressed with `balance` + `unit` (the host
-          // ranks accounts by it), and leaving `used` off is what means
-          // "not said". `aside` is also wrong on a prepaid balance: running
-          // out does stop the account.
+          // This is a measured window: `amount` is what has been consumed and
+          // `limit` is what there was to consume, which is the pair magpie
+          // turns into a progress track. `used` is sent explicitly too so the
+          // bar never depends on the host's own rounding.
+          //
+          // The ceiling is `balance + spent`, not `totalGifted`: the two agree
+          // until a top-up lands, and after that only the sum stays true to the
+          // wallet being spent out of. `balance` stays on the row because the
+          // host ranks accounts by it, and `aside` stays off — running out does
+          // stop the account.
           if (balance !== null) {
-            windows.push({
+            const ceiling = spent === null ? null : balance + spent;
+            const row = {
               name: "积分余额",
               balance: round2(balance),
               unit: "积分",
               display: money(balance),
-            });
-          }
-          // The vendor does publish a ceiling — totalGifted is what was ever
-          // granted. Surfacing it turns "489.69" into "489.69 / 500".
-          //
-          // `display` only, no `amount`/`limit`: those two make magpie
-          // derive `used = amount / limit * 100` and treat the row as a
-          // measured window. This one is a lifetime cumulative pair — it
-          // never resets, so the curve it drew climbed to 100% and stayed
-          // there, and the card showed a progress track for a total that
-          // isn't an allowance. As text it is what it says it is.
-          if (gifted !== null && spent !== null) {
-            windows.push({
-              name: "累计消耗",
-              display: `${round2(spent)} / ${round2(gifted)} 积分`,
-              aside: true,
-            });
+            };
+            if (ceiling !== null && ceiling > 0) {
+              row.amount = round2(spent);
+              row.limit = round2(ceiling);
+              row.used = Math.round((spent / ceiling) * 10000) / 100;
+              row.display = `${round2(balance)} / ${round2(ceiling)} 积分`;
+            }
+            windows.push(row);
           }
           if (eggs !== null && eggs > 0) {
             windows.push({ name: "鸭蛋", balance: round2(eggs), unit: "鸭蛋", display: `${round2(eggs)} 鸭蛋`, aside: true });

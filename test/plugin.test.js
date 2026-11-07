@@ -830,26 +830,22 @@ describe("account surfaces", () => {
     // showing both implies two wallets that don't exist.
     expect(byName("创作积分")).toBeUndefined();
 
-    // A prepaid wallet is expressed as balance + unit, which is also what
-    // magpie ranks accounts by. `used` must be absent: 0 is a real "0%
-    // consumed", not "unknown".
+    // A measured window: `amount` is consumed and `limit` is what there was
+    // to consume, which is the pair magpie charts. `balance` stays on the row
+    // because the host ranks accounts by it.
     const wallet = byName("积分余额");
     expect(wallet.balance).toBe(128);
     expect(wallet.unit).toBe("积分");
-    expect(wallet.used).toBeUndefined();
     expect(wallet.aside).toBeFalsy();
+    expect(wallet.amount).toBe(372);
+    // balance + spent, not totalGifted: after a top-up only the sum is true.
+    expect(wallet.limit).toBe(500);
+    expect(wallet.used).toBe(74.4);
+    expect(wallet.display).toBe("128 / 500 积分");
 
-    // The vendor does publish a ceiling — totalGifted — and it belongs on
-    // the card as text ("372 / 500 积分"). `amount`/`limit` would make
-    // magpie derive used = amount/limit*100 and chart a lifetime cumulative
-    // pair as a window share: the curve climbs to 100% and never comes back
-    // down, and the card shows a progress track for a total that isn't an
-    // allowance.
-    const spent = byName("累计消耗");
-    expect(spent.display).toBe("372 / 500 积分");
-    expect(spent.amount).toBeUndefined();
-    expect(spent.limit).toBeUndefined();
-    expect(spent.used).toBeUndefined();
+    // The lifetime cumulative row is gone — the bar says the same thing, and
+    // says it as a fraction instead of as text.
+    expect(byName("累计消耗")).toBeUndefined();
 
     expect(byName("鸭蛋").display).toBe("9 鸭蛋");
     expect(byName("下载额度").display).toBe("10 次");
