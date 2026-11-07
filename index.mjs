@@ -48,13 +48,16 @@ import {
 const PROVIDER = "dongleya";
 const BASE = "https://dongleya.qq.com";
 
-// The vendor publishes no context window: `/api/models` carries no such field
-// and neither bundle mentions one. These numbers are a round placeholder, not
-// a measurement — magpie uses them for the card and for its truncation hint,
-// and the upstream enforces the real ceiling by answering CONTEXT_TOO_LONG,
-// which the gateway maps to a 400. So the worst case of guessing high is one
-// clear "prompt too long" instead of a silent truncation.
-const LIMIT_DEFAULT = { context: 200_000, output: 32_768 };
+// The descriptor omits `limit` on purpose. The vendor publishes no context
+// window (`/api/models` carries no such field and neither bundle mentions one)
+// and we have no measurement of our own, so any number here would be invented
+// — and inventing one is worse than leaving it out. magpie already ships a
+// default and applies it when the field is absent, so the only thing a
+// hardcoded 200_000 would buy is a fabricated ceiling on the card and on the
+// truncation hint. The real ceiling is enforced upstream, which answers
+// CONTEXT_TOO_LONG; the gateway maps that to a 400. Same shape as
+// magpie-chatboxai's contextOf() — it emits `limit` only for a model it
+// actually measured.
 
 const CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
 /** After a failed catalog fetch, wait this long before asking again. */
@@ -228,7 +231,6 @@ function modelEntry(row) {
   // fake "none" reasoning variant in the picker.
   return {
     name: row.label || row.id,
-    limit: { ...LIMIT_DEFAULT },
     variants,
     capabilities: {
       reasoning: (row.efforts?.length ?? 0) > 0,

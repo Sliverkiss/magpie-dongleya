@@ -902,6 +902,12 @@ describe("account surfaces", () => {
     // No effort tiers means no variants: a placeholder would surface as a
     // fake "none" reasoning variant in the picker.
     expect(Object.keys(models.auto.variants)).toEqual([]);
+    // And no invented context window. The vendor publishes none, so the
+    // descriptor must carry no `limit` at all — magpie supplies its default.
+    // A hardcoded 200_000 here would put a made-up ceiling on the card and
+    // on the truncation hint for every model.
+    expect(models.hy4).not.toHaveProperty("limit");
+    expect(models.auto).not.toHaveProperty("limit");
   });
 
   test("provider.models marks the account expired when the catalog says 401", async () => {
